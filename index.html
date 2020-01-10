@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Dodge</title>
+        <style>
+        html, body {
+          height: 100%;
+          margin: 0;
+        }
+        body {
+          background: white;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        canvas {
+          background: #6e0000;
+        }
+        audio {
+          display: none;
+        }
+        </style>
+    </head>
+    <body>
+      <audio src="gameoger.wav" id="gameoger"></audio>
+      <audio src="pickupstar.wav" id="pickupstar"></audio>
+			<audio src="powerup.wav" id="powerup"></audio>
+			<audio src="usepowerup.wav" id="usepowerup"></audio>
+			<audio src="pickuppowerup.wav" id="pickuppowerup"></audio>
+			<audio src="enemygen.wav" id="enemygen"></audio>
+			<audio src="enemydeath.wav" id="enemydeath"></audio>
+      <canvas width="800" height="800" id="game"></canvas>
+      <script>
+      window.onerror = function(message, source, line, col, error) {
+      	//alert('sup');
+      	alert(line + ':' + col + ': ' + message);
+      }
+      </script>
+      <script>
+			var sounds = {};
+			sounds.pickupstar = document.getElementById('pickupstar');
+			sounds.gameoger = document.getElementById('gameoger');
+			sounds.powerup = document.getElementById('powerup');
+			sounds.usepowerup = document.getElementById('usepowerup');
+			sounds.pickuppowerup = document.getElementById('pickuppowerup');
+			sounds.enemygen = document.getElementById('enemygen');
+			sounds.enemydeath = document.getElementById('enemydeath');
+			var frame = 0;
+			var canvas = document.getElementById('game');
+			var context = canvas.getContext('2d');
+			var interval = 0;
+			var gameoger = null;
+
+			function getRandomInt(min, max) {
+				return Math.floor(Math.random() * (max - min)) + min;
+			}
+
+			function getRandomIntAndAvoid(min, max, v, r) {
+				while (true) {
+					var rand = getRandomInt(min, max);
+					if (Math.abs(rand - v) > r) {
+						return rand;
+					}
+				}
+			}
+
+			function distance(a, b) {
+				return Math.sqrt(Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2));
+			}
+
+			function movetoward(a, b, s) {
+				var dist = distance(a, b);
+				var rise = b.y - a.y;
+				var run = b.x - a.x;
+				a.y += rise / (dist / s);
+				a.x += run / (dist / s);
+			}
+
+			function moveaway(a, b, s) {
+				var dist = distance(a, b);
+				var rise = b.y - a.y;
+				var run = b.x - a.x;
+				a.y -= rise / (dist / s);
+				a.x -= run / (dist / s);
+			}
+
+			function toradians (angle) {
+			  return angle * (Math.PI / 180);
+			}
+
+			function moveindirection(a, direction, s) {
+				b = {};
+				b.x = a.x + Math.sin(toradians(direction));
+				b.y = a.y + Math.cos(toradians(direction));
+				movetoward(a, b, s);
+			}
+
+			var gamesettings = {
+				plysize: {
+					width: 50,
+					height: 50
+				},
+				plymovespeed: 10,
+				obstaclesizerange: {
+					mwidth: 30,
+					mheight: 30,
+					mxwidth: 100,
+					mxheight: 100
+				},
+				gravrange: {
+					min: 100,
+					max: 200
+				},
+				obstaclesatonce: 15,
+				starsize: 20,
+				starsatonce: 10,
+				plyaccelerationspeed: 5,
+				plymaxspeed: 500,
+				plyslowdownspeed: 5,
+				gravincrease: 2,
+				powerupevery: 10,
+				enemyevery: 15,
+				enemymovespeed: 2,
+				enemydirectionchangespeed: 50
+			};
+			var initialgravrange = {};
+			var passthrough = false;
+			initialgravrange.min = gamesettings.gravrange.min;
+			initialgravrange.max = gamesettings.gravrange.max;
+			var ply = {};
+			ply.sx = gamesettings.plysize.width;
+			ply.sy = gamesettings.plysize.height;
+			ply.vx = 0;
+			ply.vy = 0;
+			ply.x = canvas.width / 2 - ply.sx / 2;
+			ply.y = canvas.height / 2 - ply.sy / 2;
+			ply.powerup = {
+				type: 'none',
+				active: false,
+				time: 0
+			};
+			var obstacles = [];
+			var stars = [];
+			var powerups = [];
+			var enemies = [];
+			var accelerating = {
+				x: 0,
+				y: 0
+			};
+			var score = 0;
+			var high = 0;
+			var gameover = false;
+			var enemygameover = {};
+			enemygameover.active = false;
+			enemygameover.opacity = 0;
+			var pause = false;
+
+			poweruprenderers = {};
+			poweruprenderers.magnet = function(powerup) {
+				context.fillStyle = '#FFFFFFAA';
+				context.fillRect(powerup.x - 2.5, powerup.y - 2.5, gamesettings.starsize + 5, gamesettings.starsize + 5);
+				context.fillStyle = 'red';
+				context.fillRect(powerup.x, powerup.y, gamesettings.starsize, gamesettings.starsize / 2);
+				context.fillStyle = 'RoyalBlue';
+				context.fillRect(powerup.x, powerup.y + gamesettings.starsize / 2, gamesettings.starsize, gamesettings.starsize / 2);
+			}
+			poweruprenderers.womwom = 0;
+			poweruprenderers.slowmotion = function(powerup) {
+				context.fillStyle = 'rgba(255, 215, 0, ' + ((Math.sin(poweruprenderers.womwom / 30) * 0.5) + 0.5) + ')';
+				context.fillRect(powerup.x, powerup.y, gamesettings.starsize, gamesettings.starsize);
+				poweruprenderers.womwom++;
+
+			}
+			poweruprenderers.plusfive = function(powerup) {
+				context.fillStyle = 'gold';
+				context.fillRect(powerup.x, powerup.y, gamesettings.starsize, gamesettings.starsize);
+			}
+			poweruprenderers.passthrough = function(powerup) {
+				context.fillStyle = '#FFD700AA';
+				context.fillRect(powerup.x, powerup.y, gamesettings.starsize, gamesettings.starsize);
+			}
+			poweruprenderers.supersize = function(powerup) {
+				context.fillStyle = 'gold';
+				context.fillRect(powerup.x, powerup.y, gamesettings.starsize * 2, gamesettings.starsize * 2);
+			}
+			poweruprenderers.enemykiller = function(powerup) {
+				context.fillStyle = 'black';
+				context.fillRect(powerup.x, powerup.y, gamesettings.starsize, gamesettings.starsize);
+				context.strokeStyle = 'red';
+				context.lineWidth = 5;
+				context.strokeRect(powerup.x, powerup.y, gamesettings.starsize, gamesettings.starsize);
+				context.beginPath();
+				context.moveTo(powerup.x + 2.5, powerup.y + 2.5);
+				context.lineTo(powerup.x + gamesettings.starsize - 2.5, powerup.y + gamesettings.starsize - 2.5);
+				context.stroke();
+			}
+			var affectors = {};
+			affectors.magnet = {};
+			affectors.magnet.loop = function() {
+				for (var i = 0; i < stars.length; i++) {
+					var star = stars[i];
+					var dist = distance(star, ply);
+					if (dist < 150) {
+						movetoward(star, ply, 4);
+					}
+				}
+			}
+			affectors.passthrough = {};
+			affectors.passthrough.enabled = false;
+			affectors.passthrough.init = function() {
+				affectors.passthrough.enabled = true;
+			}
+			affectors.passthrough.end = function() {
+				affectors.passthrough.enabled = false;
+			}
+			affectors.slowmotion = {};
+			affectors.slowmotion.init = function() {
+				affectors.slowmotion.initialrange = {};
+				affectors.slowmotion.initialrange.min = gamesettings.gravrange.min;
+				affectors.slowmotion.initialrange.max = gamesettings.gravrange.max;
+				gamesettings.gravrange.min = 25;
+				gamesettings.gravrange.max = 75;
+				for (var i = 0; i < obstacles.length; i++) {
+					var obstacle = obstacles[i];
+					obstacle.grav = getRandomInt(25, 75);
+				}
+			}
+			affectors.slowmotion.end = function() {
+				gamesettings.gravrange.min = affectors.slowmotion.initialrange.min;
+				gamesettings.gravrange.max = affectors.slowmotion.initialrange.max;
+				for (var i = 0; i < obstacles.length; i++) {
+					var obstacle = obstacles[i];
+					obstacle.grav = getRandomInt(gamesettings.gravrange.min, gamesettings.gravrange.max);
+				}
+			}
+			affectors.plusfive = {};
+			affectors.plusfive.init = function() {
+				score += 5;
+				gamesettings.gravrange.max += (gamesettings.gravincrease / 2) * 5;
+				gamesettings.gravrange.min += (gamesettings.gravincrease / 2) * 5;
+				enemycounter += 5;
+			}
+			affectors.supersize = {};
+			affectors.supersize.init = function() {
+				for (var i = 0; i < stars.length; i++) {
+					var star = stars[i];
+					star.x -= star.sx / 2;
+					star.y -= star.sy / 2;
+					star.sx = star.sx * 2;
+					star.sy = star.sy * 2;
+				}
+			}
+			affectors.enemykiller = {};
+			affectors.enemykiller.init = function() {
+				affectors.enemykiller.initialrange = {};
+				affectors.enemykiller.initialrange.min = gamesettings.gravrange.min;
+				affectors.enemykiller.initialrange.max = gamesettings.gravrange.max;
+				gamesettings.gravrange.min = 0;
+				gamesettings.gravrange.max = 0;
+				for (var i = 0; i < obstacles.length; i++) {
+					var obstacle = obstacles[i];
+					obstacle.grav = 0;
+				}
+				stars = [];
+			}
+			affectors.enemykiller.loop = function() {
+				if (enemies.length == 0 && ply.powerup.time > 3) {
+					ply.powerup.time = 3;
+				}
+			}
+			affectors.enemykiller.end = function() {
+				gamesettings.gravrange.min = affectors.enemykiller.initialrange.min;
+				gamesettings.gravrange.max = affectors.enemykiller.initialrange.max;
+				for (var i = 0; i < obstacles.length; i++) {
+					var obstacle = obstacles[i];
+					obstacle.grav = getRandomInt(gamesettings.gravrange.min, gamesettings.gravrange.max);
+				}
+				enemycounter = 0;
+				for (var i = 0; i < gamesettings.starsatonce; i++) {
+					stars.push({
+						x: getRandomInt(0, canvas.width - gamesettings.starsize),
+						y: getRandomInt(0, canvas.height - gamesettings.starsize),
+						sx: gamesettings.starsize,
+						sy: gamesettings.starsize,
+						blink: getRandomInt(0, 50),
+					});
+				}
+			}
+
+			var poweruptypes = {
+				magnet: {
+					name: 'Magnet',
+					time: 15,
+					loop: affectors.magnet.loop,
+					draw: poweruprenderers.magnet,
+					size: gamesettings.starsize
+				},
+				passthrough: {
+					name: 'Pass-through',
+					time: 10,
+					init: affectors.passthrough.init,
+					end: affectors.passthrough.end,
+					draw: poweruprenderers.passthrough,
+					size: gamesettings.starsize
+				},
+				'+5': {
+					name: '+5',
+					time: 0,
+					init: affectors.plusfive.init,
+					draw: poweruprenderers.plusfive,
+					size: gamesettings.starsize
+				},
+				slowmotion: {
+					name: 'Slow-motion',
+					time: 15,
+					init: affectors.slowmotion.init,
+					end: affectors.slowmotion.end,
+					draw: poweruprenderers.slowmotion,
+					size: gamesettings.starsize
+				},
+				supersize: {
+					name: 'Supersize',
+					time: 0,
+					init: affectors.supersize.init,
+					draw: poweruprenderers.supersize,
+					size: gamesettings.starsize * 2
+				},
+				enemykiller: {
+					name: 'Enemy Killer',
+					time: 15,
+					init: affectors.enemykiller.init,
+					loop: affectors.enemykiller.loop,
+					end: affectors.enemykiller.end,
+					draw: poweruprenderers.enemykiller,
+					size: gamesettings.starsize
+				}
+			};
+			var powerupcounter = 0;
+			var enemycounter = 0;
+
+
+			function getOS() {
+				var userAgent = window.navigator.userAgent,
+					platform = window.navigator.platform,
+					macosPlatforms = ['Macintosh', 'MacIntel', 'MacPPC', 'Mac68K'],
+					windowsPlatforms = ['Win32', 'Win64', 'Windows', 'WinCE'],
+					iosPlatforms = ['iPhone', 'iPad', 'iPod'],
+					os = null;
+
+				if (macosPlatforms.indexOf(platform) !== -1) {
+					os = 'Mac OS';
+				} else if (iosPlatforms.indexOf(platform) !== -1) {
+					os = 'iOS';
+				} else if (windowsPlatforms.indexOf(platform) !== -1) {
+					os = 'Windows';
+				} else if (/Android/.test(userAgent)) {
+					os = 'Android';
+				} else if (!os && /Linux/.test(platform)) {
+					os = 'Linux';
+				}
+
+				return os;
+			}
+
+			function setFontSize(size) {
+				var os = getOS();
+				if (os == 'Mac OS') {
+					context.font = size + ' Monaco';
+				} else if (os == 'Windows') {
+					context.font = size + ' Consolas';
+				}
+			}
+
+			var cmd = {};
+			cmd.createpowerup = function(type) {
+				powerups.push({
+					poweruptype: type,
+					x: getRandomInt(0, canvas.width - type.size),
+					y: getRandomInt(0, canvas.height - type.size),
+					sx: type.size,
+					sy: type.size
+				});
+			}
+			cmd.onframe = [];
+			cmd.createenemy = function() {
+				enemies.push({
+					x: getRandomIntAndAvoid(0, canvas.width - gamesettings.starsize, ply.x, 350),
+					y: getRandomIntAndAvoid(0, canvas.height - gamesettings.starsize, ply.y, 350),
+					sx: gamesettings.starsize,
+					sy: gamesettings.starsize,
+					direction: getRandomInt(0, 360)
+				});
+			}
+
+			function setgame() {
+				gameoger = null;
+				if (ply.powerup.active) {
+					if (ply.powerup.type.end) {
+						ply.powerup.type.end();
+					}
+					window.clearInterval(interval);
+				}
+				ply.powerup = {
+					type: null,
+					active: false,
+					loop: null,
+					time: 0
+				};
+				powerups = [];
+				gamesettings.gravrange.min = initialgravrange.min;
+				gamesettings.gravrange.max = initialgravrange.max;
+				gameover = false;
+				score = 0;
+				ply.x = canvas.width / 2 - ply.sx / 2;
+				ply.y = canvas.height / 2 - ply.sy / 2;
+				ply.vx = 0;
+				ply.vy = 0;
+				enemies = [];
+				obstacles = [];
+				stars = [];
+				enemygameover = {};
+				enemygameover.active = false;
+				enemygameover.opacity = 0;
+				affectors.passthrough.enabled = false;
+
+				// generate initial obstacles
+				for (var i = 0; i < gamesettings.obstaclesatonce; i++) {
+					var sx = getRandomInt(gamesettings.obstaclesizerange.mwidth, gamesettings.obstaclesizerange.mxwidth);
+					obstacles.push({
+						x: getRandomIntAndAvoid(0, canvas.width - sx, canvas.width / 2, ply.sx * 2),
+						y: getRandomIntAndAvoid(0, canvas.height, canvas.height / 2, ply.sy * 2),
+						sx: sx,
+						sy: getRandomInt(gamesettings.obstaclesizerange.mheight, gamesettings.obstaclesizerange.mxheight),
+						grav: getRandomInt(gamesettings.gravrange.min, gamesettings.gravrange.max),
+						dying: false,
+						dead: false
+					});
+				}
+
+				// generate initial stars
+				for (var i = 0; i < gamesettings.starsatonce; i++) {
+					stars.push({
+						x: getRandomInt(0, canvas.width - gamesettings.starsize),
+						y: getRandomInt(0, canvas.height - gamesettings.starsize),
+						sx: gamesettings.starsize,
+						sy: gamesettings.starsize,
+						blink: getRandomInt(0, 50),
+					});
+				}
+				/*var chosenpowerup = poweruptypes.slowmotion;
+				for (var i = 0; i < 1; i++) {
+					powerups.push({
+						poweruptype: chosenpowerup,
+						x: getRandomInt(0, canvas.width - chosenpowerup.size),
+						y: getRandomInt(0, canvas.height - chosenpowerup.size),
+						sx: chosenpowerup.size,
+						sy: chosenpowerup.size
+					});
+				}*/
+			}
+			setgame();
+
+			function detectcollision(a, b) {
+				if (a.x < b.x + b.sx &&
+					a.x + a.sx > b.x &&
+					a.y < b.y + b.sy &&
+					a.y + a.sy > b.y) {
+					return true;
+				}
+				return false;
+			}
+
+			// game loop
+			function loop() {
+				if (++frame >= 60) {
+					frame = 0;
+				}
+				//alert('loop');
+				requestAnimationFrame(loop);
+				context.clearRect(0, 0, canvas.width, canvas.height);
+
+				if (!gameover && !pause) {
+					// apply player acceleration from input
+					ply.vx += gamesettings.plyaccelerationspeed * (accelerating.x * 2);
+					ply.vy += gamesettings.plyaccelerationspeed * (accelerating.y * 2);
+
+					// prevent player from accelerating past bounds
+					if (ply.x <= 0) {
+						ply.x = 0;
+						if (ply.vx < 0) {
+							ply.vx = 0;
+						}
+					}
+					if (ply.x >= canvas.width - ply.sx) {
+						ply.x = canvas.width - ply.sx;
+						if (ply.vx > 0) {
+							ply.vx = 0;
+						}
+					}
+					if (ply.y <= 0) {
+						ply.y = 0;
+						if (ply.vy < 0) {
+							ply.vy = 0;
+						}
+					}
+					if (ply.y >= canvas.height - ply.sy) {
+						ply.y = canvas.height - ply.sy;
+						if (ply.vy > 0) {
+							ply.vy = 0;
+						}
+					}
+
+					// apply accleration slow down
+					if (ply.vx > 0) {
+						ply.vx -= gamesettings.plyaccelerationspeed / 2;
+					} else if (ply.vx < 0) {
+						ply.vx += gamesettings.plyaccelerationspeed / 2;
+					}
+					if (ply.vy > 0) {
+						ply.vy -= gamesettings.plyaccelerationspeed / 2;
+					} else if (ply.vy < 0) {
+						ply.vy += gamesettings.plyaccelerationspeed / 2;
+					}
+					// apply player motion from acceleration
+					ply.x += ply.vx / 60;
+					ply.y += ply.vy / 60;
+					if (ply.vx > gamesettings.plymaxspeed) {
+						ply.vx = gamesettings.plymaxspeed;
+					}
+					if (ply.vy > gamesettings.plymaxspeed) {
+						ply.vy = gamesettings.plymaxspeed;
+					}
+
+					// move enemies
+					for (var i = 0; i < enemies.length; i++) {
+						var enemy = enemies[i];
+						enemy.direction += gamesettings.enemydirectionchangespeed / 60;
+						var dist = distance(ply, enemy);
+						if (dist < 250) {
+							if (ply.powerup.type == poweruptypes.enemykiller && ply.powerup.active) {
+								moveaway(enemy, ply, gamesettings.enemymovespeed);
+							} else {
+								movetoward(enemy, ply, gamesettings.enemymovespeed);
+							}
+						} else {
+							moveindirection(enemy, enemy.direction, gamesettings.enemymovespeed);
+						}
+
+						// prevent enemies from moving past screen bounds
+						if (enemy.x <= 0) {
+							enemy.x = 0;
+							enemy.direction += 180;
+						}
+						if (enemy.x >= canvas.width - enemy.sx) {
+							enemy.x = canvas.width - enemy.sx;
+							enemy.direction += 180;
+						}
+						if (enemy.y <= 0) {
+							enemy.y = 0;
+							enemy.direction += 180;
+						}
+						if (enemy.y >= canvas.height - enemy.sy) {
+							enemy.y = canvas.height - enemy.sy;
+							enemy.direction += 180;
+						}
+					}
+
+					// detect star collision
+					for (var i = 0; i < stars.length; i++) {
+						var star = stars[i];
+						if (detectcollision(ply, star)) {
+							score++;
+							stars.splice(i, 1);
+							stars.push({
+								x: getRandomInt(0, canvas.width - gamesettings.starsize),
+								y: getRandomInt(0, canvas.height - gamesettings.starsize),
+								sx: gamesettings.starsize,
+								sy: gamesettings.starsize,
+								blink: getRandomInt(0, 50),
+							});
+							if (!ply.powerup.active) {
+								gamesettings.gravrange.max += gamesettings.gravincrease;
+								gamesettings.gravrange.min += gamesettings.gravincrease;
+							} else {
+								if (ply.powerup.type == poweruptypes.slowmotion) {
+									affectors.slowmotion.initialrange.min += gamesettings.gravincrease / 2;
+									affectors.slowmotion.initialrange.max += gamesettings.gravincrease / 2;
+								} else {
+									gamesettings.gravrange.max += gamesettings.gravincrease / 2;
+									gamesettings.gravrange.min += gamesettings.gravincrease / 2;
+								}
+							}
+							//if (!ply.powerup.active) {
+								powerupcounter++;
+							//}
+							enemycounter++;
+							if (powerupcounter >= gamesettings.powerupevery) {
+								powerupcounter = 0;
+								var chosenpowerup;
+								if (enemies.length > 0) {
+									chosenpowerup = poweruptypes.enemykiller;
+								} else {
+									var powerupnames = Object.keys(poweruptypes);
+									var chosenpowerupname = powerupnames[getRandomInt(0, powerupnames.length - 1)];
+									chosenpowerup = poweruptypes[chosenpowerupname];
+								}
+								powerups.push({
+									poweruptype: chosenpowerup,
+									x: getRandomInt(0, canvas.width - chosenpowerup.size),
+									y: getRandomInt(0, canvas.height - chosenpowerup.size),
+									sx: chosenpowerup.size,
+									sy: chosenpowerup.size
+								});
+								sounds.powerup.currentTime = 0;
+								sounds.powerup.play();
+							} else if (enemycounter >= gamesettings.enemyevery) {
+								enemycounter = 0;
+								enemies.push({
+									x: getRandomIntAndAvoid(0, canvas.width - gamesettings.starsize, ply.x, 350),
+									y: getRandomIntAndAvoid(0, canvas.height - gamesettings.starsize, ply.y, 350),
+									sx: gamesettings.starsize,
+									sy: gamesettings.starsize,
+									direction: getRandomInt(0, 360)
+								});
+								sounds.enemygen.currentTime = 0;
+								sounds.enemygen.play();
+							} else {
+								sounds.pickupstar.currentTime = 0;
+								sounds.pickupstar.play();
+							}
+						}
+					}
+
+					// detect powerup collision
+					for (var i = 0; i < powerups.length; i++) {
+						var powerup = powerups[i];
+						if (detectcollision(ply, powerup) && !ply.powerup.type) {
+							ply.powerup = {
+								type: powerup.poweruptype,
+								active: false,
+								time: powerup.poweruptype.time
+							};
+							sounds.pickuppowerup.currentTime = 0;
+							sounds.pickuppowerup.play();
+							powerups.splice(i, 1);
+						}
+					}
+
+					// detect obstacle collision
+					for (var i = 0; i < obstacles.length; i++) {
+						var obstacle = obstacles[i]
+						if (detectcollision(ply, obstacle) && !affectors.passthrough.enabled) {
+							gameover = true;
+							sounds.gameoger.currentTime = 0;
+							sounds.gameoger.play();
+						}
+					}
+
+					// detect enemy collision
+					for (var i = 0; i < enemies.length; i++) {
+						var enemy = enemies[i];
+						if (detectcollision(ply, enemy)) {
+							if (ply.powerup.type == poweruptypes.enemykiller && ply.powerup.active) {
+								var powerupnames = Object.keys(poweruptypes);
+								var chosenpowerupname = powerupnames[getRandomInt(0, powerupnames.length - 1)];
+								chosenpowerup = poweruptypes[chosenpowerupname];
+								powerups.push({
+									poweruptype: chosenpowerup,
+									x: getRandomInt(0, canvas.width - chosenpowerup.size),
+									y: getRandomInt(0, canvas.height - chosenpowerup.size),
+									sx: chosenpowerup.size,
+									sy: chosenpowerup.size
+								});
+								enemies.splice(i, 1);
+								sounds.powerup.currentTime = 0;
+								sounds.powerup.play();
+							} else {
+								sounds.enemydeath.currentTime = 0;
+								sounds.enemydeath.play();
+								gameover = true;
+								enemygameover.active = true;
+							}
+						}
+					}
+
+					// run powerup loop effects
+					if (ply.powerup.active && ply.powerup.type.loop) {
+						ply.powerup.type.loop();
+					}
+				}
+
+				// draw powerups
+				for (var i = 0; i < powerups.length; i++) {
+					var powerup = powerups[i];
+					powerup.poweruptype.draw(powerup);
+				}
+
+				// draw enemies
+				if (!(ply.powerup.type == poweruptypes.enemykiller && ply.powerup.active && frame >= 50)) {
+					for (var i = 0; i < enemies.length; i++) {
+						var enemy = enemies[i];
+						context.fillStyle = 'black';
+						context.fillRect(enemy.x, enemy.y, enemy.sx, enemy.sy);
+					}
+				}
+
+				// cmd onframe
+				for (var i = 0; i < cmd.onframe.length; i++) {
+					cmd.onframe[i]();
+				}
+
+				// draw player
+				context.fillStyle = 'white';
+				if (ply.powerup.active && ply.powerup.time <= 3 && ((frame >= 0 && frame < 15) || (frame >= 30) && (frame < 45)) && !pause && !gameover) {
+					context.fillStyle = 'black';
+				}
+				context.fillRect(ply.x, ply.y, ply.sx, ply.sy);
+
+				// draw stars
+				context.fillStyle = 'white';
+				for (var i = 0; i < stars.length; i++) {
+					var star = stars[i];
+					if (!(frame >= star.blink && frame <= star.blink + 10)) {
+						context.fillRect(star.x, star.y, star.sx, star.sy)
+					}
+				}
+
+				// draw obstacles, apply gravity, & regenerate obstacles.
+				context.fillStyle = '#00000077';
+				if (affectors.passthrough.enabled) {
+					context.fillStyle = '#00000033';
+				}
+				for (var i = 0; i < obstacles.length; i++) {
+					var obstacle = obstacles[i];
+					context.fillRect(obstacle.x, obstacle.y, obstacle.sx, obstacle.sy);
+					if (!pause && !gameover) {
+						obstacle.y += obstacle.grav / 60;
+						if (obstacle.y > canvas.height && obstacle.dying) {
+							//alert(obstacle.y);
+							obstacle.dead = true;
+						}
+						if (obstacle.y + obstacle.sy > canvas.height && !obstacle.dying) {
+							obstacle.dying = true;
+							var sy = getRandomInt(gamesettings.obstaclesizerange.mheight, gamesettings.obstaclesizerange.mxheight);
+							var sx = getRandomInt(gamesettings.obstaclesizerange.mwidth, gamesettings.obstaclesizerange.mxwidth);
+							obstacles.push({
+								x: getRandomInt(0, canvas.width - sx),
+								y: 0 - sy,
+								sx: sx,
+								sy: sy,
+								grav: getRandomInt(gamesettings.gravrange.min, gamesettings.gravrange.max),
+								dying: false,
+								dead: false
+							});
+						}
+					}
+				}
+				// kill old obstacles
+				for (var i = 0; i < obstacles.length; i++) {
+					var obstacle = obstacles[i];
+					if (obstacle.dead) {
+						obstacles.splice(i, 1);
+					}
+				}
+
+				//draw enemy death fade
+				if (enemygameover.active) {
+					context.fillStyle = 'rgba(0, 0, 0, ' + enemygameover.opacity.toString() + ')';
+					context.fillRect(0, 0, canvas.width, canvas.height);
+					if (enemygameover.opacity < 1) {
+						enemygameover.opacity += 0.005;
+					}
+				}
+
+				//draw score
+				context.textAlign = 'left';
+				context.lineWidth = 5;
+				setFontSize('40px')
+				context.strokeStyle = '#6e0000';
+				context.fillStyle = 'white';
+				if (enemygameover.active) {
+					context.lineWidth = 0;
+					context.strokeStyle = '#00000000';
+				}
+				context.strokeText(score.toString(), 5, 40);
+				context.fillText(score.toString(), 5, 40);
+
+				//draw high score;
+				context.textAlign = 'right';
+				if (score > high) {
+					high = score;
+				}
+				context.strokeText(high.toString(), canvas.width - 5, 60);
+				context.fillText(high.toString(), canvas.width - 5, 60);
+				setFontSize('20px');
+				context.strokeText('HIGH'.toString(), canvas.width - 5, 20);
+				context.fillText('HIGH'.toString(), canvas.width - 5, 20);
+
+				// draw pause or gameover text
+				setFontSize('80px');
+				context.fillStyle = 'black';
+				context.textAlign = 'center';
+				if (pause) {
+					context.strokeText('PAUSE', canvas.width / 2, canvas.height / 2);
+					context.fillText('PAUSE', canvas.width / 2, canvas.height / 2);
+				} else if (gameover) {
+					if (gameoger == null) {
+						gameoger = (getRandomInt(0, 100) <= 5);
+					}
+					var gameovertext;
+					if (gameoger) {
+						gameovertext = "GAME OGER";
+					} else {
+						gameovertext = "GAME OVER";
+					}
+					if (enemygameover.active) {
+						context.fillStyle = '#6e0000';
+					} else {
+						context.strokeText(gameovertext, canvas.width / 2, canvas.height / 2);
+					}
+					context.fillText(gameovertext, canvas.width / 2, canvas.height / 2);
+				}
+
+				// draw powerup text
+				if (ply.powerup.type) {
+					setFontSize('40px');
+					context.fillStyle = 'white'
+					context.textAlign = 'center';
+					context.strokeText(ply.powerup.type.name, canvas.width / 2, 40);
+					context.fillText(ply.powerup.type.name, canvas.width / 2, 40);
+					setFontSize('20px');
+					if (ply.powerup.active) {
+						context.strokeText(ply.powerup.time.toString(), canvas.width / 2, 70);
+						context.fillText(ply.powerup.time.toString(), canvas.width / 2, 70);
+					} else {
+						context.strokeText('Press space to use powerup', canvas.width / 2, 70);
+						context.fillText('Press space to use powerup', canvas.width / 2, 70);
+					}
+				}
+
+			}
+			// listen to keyboard events
+			document.addEventListener('keydown', function(e) {
+				// left arrow key
+				if (e.which === 65) {
+					accelerating.x = -1;
+				}
+				// up arrow key
+				else if (e.which === 87) {
+					accelerating.y = -1;
+				}
+				// right arrow key
+				else if (e.which === 68) {
+					accelerating.x = 1;
+				}
+				// down arrow key
+				else if (e.which === 83) {
+					accelerating.y = 1;
+				}
+				// space
+				else if (e.which === 32) {
+					if (gameover) {
+						setgame();
+						//enemygameover.active = false;
+						return;
+					}
+					if (pause) {
+						pause = false;
+						return;
+					}
+					if (ply.powerup.type && !ply.powerup.active) {
+						sounds.usepowerup.currentTime = 0;
+						sounds.usepowerup.play();
+						var poweruptype = ply.powerup.type;
+						if (poweruptype.init) {
+							poweruptype.init();
+						}
+						ply.powerup.time = ply.powerup.type.time;
+						ply.powerup.active = true;
+						interval = 0;
+						if (ply.powerup.time == 0) {
+							if (poweruptype.end) {
+								poweruptype.end;
+							}
+							ply.powerup = {
+								type: null,
+								active: false,
+								time: 0
+							};
+							window.clearInterval(interval);
+						}
+						interval = window.setInterval(function() {
+							if (ply.powerup.time == 0) {
+								if (poweruptype.end) {
+									poweruptype.end();
+								}
+								ply.powerup = {
+									type: null,
+									active: false,
+									loop: null,
+									time: 0
+								};
+								window.clearInterval(interval);
+							}
+							if (!pause && !gameover) {
+								ply.powerup.time--;
+							}
+						}, 1000);
+					} else {
+						pause = !pause;
+					}
+				} else if (e.which === 67) {
+					if (pause) {
+						eval(prompt('Enter JS'));
+					}
+				} else if (e.which === 81) {
+					if (!gameover) {
+						pause = !pause;
+					}
+				}
+			});
+			document.addEventListener('keyup', function(e) {
+				// left arrow key
+				if (e.which === 65) {
+					accelerating.x = 0;
+				}
+				// up arrow key
+				else if (e.which === 87) {
+					accelerating.y = 0;
+				}
+				// right arrow key
+				else if (e.which === 68) {
+					accelerating.x = 0;
+				}
+				// down arrow key
+				else if (e.which === 83) {
+					accelerating.y = 0;
+				}
+			});
+			// start the game
+			requestAnimationFrame(loop);
+      </script>
+    </body>
+</html>
