@@ -35,6 +35,14 @@
       	//alert('sup');
       	alert(line + ':' + col + ': ' + message);
       }
+      document.body.onresize = function() {
+        var canvas = document.getElementById('game');
+        canvas.width = document.body.offsetWidth;
+        canvas.height = document.body.offsetHeight;
+      }
+      var canvas = document.getElementById('game');
+      canvas.width = document.body.offsetWidth;
+      canvas.height = document.body.offsetHeight;
       </script>
       <script>
 			var sounds = {};
@@ -394,6 +402,8 @@
 
 			function setgame() {
 				gameoger = null;
+        gamesettings.obstaclesatonce = (15 / 640000) * (canvas.width * canvas.height);
+        gamesettings.starsatonce = (10 / 640000) * (canvas.width * canvas.height);
 				if (ply.powerup.active) {
 					if (ply.powerup.type.end) {
 						ply.powerup.type.end();
